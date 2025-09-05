@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Interactive Magnet Simulation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            touch-action: none;
+        }
+        #simulationCanvas {
+            cursor: grab;
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #simulationCanvas:active {
+            cursor: grabbing;
+        }
+        .panel {
+            background-color: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(209, 213, 219, 0.5);
+        }
+        .btn {
+            transition: all 0.2s ease-in-out;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .btn:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .size-btn.active {
+            background-color: #4f46e5;
+            color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            transform: translateY(-1px);
+        }
+        input[type="range"] {
+            -webkit-appearance: none; appearance: none;
+            width: 100%; height: 8px; background: #d1d5db; border-radius: 5px;
+            outline: none; opacity: 0.7; transition: opacity .2s;
+        }
+        input[type="range"]:hover { opacity: 1; }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none;
+            width: 20px; height: 20px; background: #4f46e5; cursor: pointer;
+            border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 20px; height: 20px; background: #4f46e5; cursor: pointer;
+            border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4 overflow-hidden">
+
+    <div class="w-full max-w-7xl mx-auto">
+        <div class="flex justify-between items-start mb-2">
+            <header class="text-left">
+                <h1 class="text-3xl md:text-4xl font-bold text-gray-800">3D Electromagnet Simulation</h1>
+                <p class="text-gray-600 mt-1">Click and drag to rotate. Scroll to zoom. Right-click to pan.</p>
+            </header>
+            
+            <div id="stats-panel" class="panel p-3 rounded-lg shadow-md text-sm text-gray-700 font-mono w-60 flex-shrink-0 hidden sm:block">
+                <h3 class="font-bold text-base mb-2 text-gray-800 border-b pb-1">System Stats</h3>
+                <p>Objects: <span id="stat-magnets" class="font-semibold text-indigo-600">0</span></p>
+                <p>Kinetic Energy: <span id="stat-energy" class="font-semibold text-indigo-600">0.00</span></p>
+                <p>Strongest Pole: <span id="stat-strength" class="font-semibold text-indigo-600">0</span></p>
+            </div>
+        </div>
+        
+        <div class="flex justify-center mb-4">
+            <div class="panel p-2 rounded-xl shadow-md flex items-center gap-2">
+                <span class="font-medium text-gray-700 text-sm ml-2">Volume:</span>
+                <button class="size-btn btn bg-white font-semibold py-1 px-3 text-sm rounded-lg shadow active" data-scale="1">1x</button>
+                <button class="size-btn btn bg-white font-semibold py-1 px-3 text-sm rounded-lg shadow" data-scale="2">2x</button>
+                <button class="size-btn btn bg-white font-semibold py-1 px-3 text-sm rounded-lg shadow" data-scale="4">4x</button>
+            </div>
+        </div>
+
+        <div id="canvas-container" class="relative w-full aspect-video bg-white rounded-xl shadow-lg border border-gray-200">
+            <!-- Canvas is inserted here by Three.js -->
+            
+            <div class="absolute bottom-4 left-4 w-full max-w-xs">
+                <div class="panel p-3 rounded-xl shadow-lg flex flex-col gap-3">
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="addNorth" class="btn bg-red-500 text-white font-bold py-2 px-3 h-10 rounded-lg shadow-md text-sm">Add +</button>
+                        <button id="addSouth" class="btn bg-blue-500 text-white font-bold py-2 px-3 h-10 rounded-lg shadow-md text-sm">Add -</button>
+                        <button id="addGyro" class="btn bg-purple-500 text-white font-bold py-2 px-3 h-10 rounded-lg shadow-md text-sm">Add Gyro</button>
+                        <button id="clear" class="btn bg-gray-600 text-white font-semibold py-2 px-4 h-10 rounded-lg shadow-md text-sm">Clear</button>
+                    </div>
+                    
+                    <div class="w-full flex items-center gap-2 border-t border-gray-200 pt-3">
+                        <label class="font-medium text-gray-700 text-sm whitespace-nowrap w-24">Magnet Str:</label>
+                        <input type="range" id="strengthSlider" min="1" max="500" value="50" class="w-full">
+                        <span id="strengthValue" class="font-bold text-indigo-600 w-10 text-center text-sm">50</span>
+                    </div>
+
+                    <div class="w-full flex items-center gap-2 border-t border-gray-200 pt-3">
+                        <label class="font-medium text-red-500 text-sm whitespace-nowrap w-24">Gyro +:</label>
+                        <input type="range" id="gyroNorthStrengthSlider" min="1" max="2000" value="1000" class="w-full">
+                        <span id="gyroNorthStrengthValue" class="font-bold text-red-500 w-10 text-center text-sm">1000</span>
+                    </div>
+
+                    <div class="w-full flex items-center gap-2 border-t border-gray-200 pt-3">
+                        <label class="font-medium text-blue-500 text-sm whitespace-nowrap w-24">Gyro -:</label>
+                        <input type="range" id="gyroSouthStrengthSlider" min="1" max="2000" value="1000" class="w-full">
+                        <span id="gyroSouthStrengthValue" class="font-bold text-blue-500 w-10 text-center text-sm">1000</span>
+                    </div>
+                    
+                    <div class="w-full flex items-center gap-2 border-t border-gray-200 pt-3">
+                        <label class="font-medium text-gray-500 text-sm whitespace-nowrap w-24">Gyro Core:</label>
+                        <input type="range" id="gyroCenterStrengthSlider" min="-2000" max="2000" value="0" class="w-full">
+                        <span id="gyroCenterStrengthValue" class="font-bold text-gray-500 w-10 text-center text-sm">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- DOM Elements ---
+        const canvasContainer = document.getElementById('canvas-container');
+        const addNorthBtn = document.getElementById('addNorth');
+        const addSouthBtn = document.getElementById('addSouth');
+        const addGyroBtn = document.getElementById('addGyro');
+        const clearBtn = document.getElementById('clear');
+        const strengthSlider = document.getElementById('strengthSlider');
+        const strengthValue = document.getElementById('strengthValue');
+        const gyroNorthStrengthSlider = document.getElementById('gyroNorthStrengthSlider');
+        const gyroNorthStrengthValue = document.getElementById('gyroNorthStrengthValue');
+        const gyroSouthStrengthSlider = document.getElementById('gyroSouthStrengthSlider');
+        const gyroSouthStrengthValue = document.getElementById('gyroSouthStrengthValue');
+        const gyroCenterStrengthSlider = document.getElementById('gyroCenterStrengthSlider');
+        const gyroCenterStrengthValue = document.getElementById('gyroCenterStrengthValue');
+        const sizeBtns = document.querySelectorAll('.size-btn');
+        const statMagnets = document.getElementById('stat-magnets');
+        const statEnergy = document.getElementById('stat-energy');
+        const statStrength = document.getElementById('stat-strength');
+
+        // --- Global State ---
+        let electromagnets = [];
+        let gyroscopes = [];
+        let scene, camera, renderer, controls;
+        let raycaster, mouse, plane;
+        let selectedMagnet = null;
+        
+        // --- Simulation Parameters ---
+        let simulationScale = 1;
+        const BASE_BOUNDS = 200;
+        let simulationBounds = new THREE.Box3(
+            new THREE.Vector3(-BASE_BOUNDS, -BASE_BOUNDS, -BASE_BOUNDS),
+            new THREE.Vector3(BASE_BOUNDS, BASE_BOUNDS, BASE_BOUNDS)
+        );
+        const FORCE_CONSTANT = 40000;
+        const MAGNET_BASE_RADIUS = 10;
+        const DAMPING = 0.99;
+        const GYRO_RING_SAMPLES = 16; // Points to sample on each gyro ring for force calculation
+        const GRAVITY = new THREE.Vector3(0, -50, 0); // Gravitational force
+
+        // --- Initialization ---
+        function init() {
+            // Scene setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf0f0f0);
+
+            // Camera setup
+            camera = new THREE.PerspectiveCamera(75, canvasContainer.clientWidth / canvasContainer.clientHeight, 0.1, 5000);
+            camera.position.set(250, 200, 450);
+
+            // Renderer setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            canvasContainer.appendChild(renderer.domElement);
+            renderer.domElement.id = 'simulationCanvas';
+
+            // Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            // Lighting
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            dirLight.position.set(100, 200, 300);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            // Helpers
+            const grid = new THREE.GridHelper(BASE_BOUNDS * 2 * 4, 20);
+            grid.position.y = -BASE_BOUNDS * simulationScale;
+            scene.add(grid);
+            scene.add(new THREE.Box3Helper(simulationBounds, 0x888888));
+
+            // Interaction setup
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+            plane = new THREE.Plane();
+            
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            renderer.domElement.addEventListener('pointerdown', onPointerDown);
+            renderer.domElement.addEventListener('pointermove', onPointerMove);
+            renderer.domElement.addEventListener('pointerup', onPointerUp);
+            
+            // Start simulation
+            addMagnet(50);
+            animate();
+        }
+
+        // --- Core Classes ---
+        class Electromagnet {
+            constructor(position, strength) {
+                this.strength = strength;
+                this.radius = MAGNET_BASE_RADIUS * (1 + Math.abs(strength) / 500);
+                this.mass = Math.PI * this.radius * this.radius;
+                
+                const geometry = new THREE.SphereGeometry(this.radius, 32, 16);
+                const material = new THREE.MeshStandardMaterial({
+                    color: this.strength > 0 ? 0xef4444 : 0x3b82f6,
+                    metalness: 0.3,
+                    roughness: 0.4,
+                });
+                
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.mesh.position.copy(position);
+                this.mesh.castShadow = true;
+                this.mesh.userData.parent = this;
+
+                this.velocity = new THREE.Vector3();
+                scene.add(this.mesh);
+            }
+
+            update(deltaTime) {
+                if (this !== selectedMagnet) {
+                    this.velocity.addScaledVector(GRAVITY, deltaTime);
+                    this.velocity.multiplyScalar(DAMPING);
+                    this.mesh.position.addScaledVector(this.velocity, deltaTime);
+                }
+                this.handleBounds();
+            }
+            
+            handleBounds() {
+                const pos = this.mesh.position;
+                if (pos.x - this.radius < simulationBounds.min.x || pos.x + this.radius > simulationBounds.max.x) {
+                    pos.x = Math.max(simulationBounds.min.x + this.radius, Math.min(simulationBounds.max.x - this.radius, pos.x)); this.velocity.x *= -0.7;
+                }
+                if (pos.y - this.radius < simulationBounds.min.y || pos.y + this.radius > simulationBounds.max.y) {
+                    pos.y = Math.max(simulationBounds.min.y + this.radius, Math.min(simulationBounds.max.y - this.radius, pos.y)); this.velocity.y *= -0.7;
+                }
+                if (pos.z - this.radius < simulationBounds.min.z || pos.z + this.radius > simulationBounds.max.z) {
+                   pos.z = Math.max(simulationBounds.min.z + this.radius, Math.min(simulationBounds.max.z - this.radius, pos.z)); this.velocity.z *= -0.7;
+                }
+            }
+            
+            dispose() {
+                scene.remove(this.mesh);
+                this.mesh.geometry.dispose();
+                this.mesh.material.dispose();
+            }
+        }
+
+        class Gyroscope {
+            constructor(position, northStrength, southStrength, centerStrength) {
+                this.mesh = new THREE.Group();
+                this.mesh.position.copy(position);
+                scene.add(this.mesh);
+                
+                this.northStrength = northStrength;
+                this.southStrength = southStrength;
+                this.centerStrength = centerStrength;
+
+                // Physics properties
+                this.velocity = new THREE.Vector3();
+                this.angularVelocity = new THREE.Vector3(0, 0.5, 0.1);
+                this.mass = 5000;
+                this.inertia = this.mass * 50;
+                
+                // Motor properties for independent ring spin
+                this.outerRingSpeed = 0.8; // radians per second
+                this.innerRingSpeed = -1.2;
+                this.outerRingAngle = 0;
+                this.innerRingAngle = 0;
+
+                // Visual components
+                const frameMat = new THREE.MeshStandardMaterial({ color: 0x666666, metalness: 0.8, roughness: 0.2, transparent: true, opacity: 0.5 });
+                this.outerRingMesh = new THREE.Mesh(new THREE.TorusGeometry(80, 4, 16, 100), frameMat);
+                this.innerRingMesh = new THREE.Mesh(new THREE.TorusGeometry(50, 4, 16, 100), frameMat);
+                
+                // The center magnet is a special Electromagnet instance for visuals
+                this.centerMagnet = new Electromagnet(new THREE.Vector3(), 0);
+                this.centerMagnet.mesh.scale.set(2, 2, 2); // Make it larger
+                
+                this.mesh.add(this.outerRingMesh, this.innerRingMesh, this.centerMagnet.mesh);
+                this.updateCenterStrength(centerStrength);
+            }
+
+            updateStrengths(north, south, center) {
+                this.northStrength = north;
+                this.southStrength = south;
+                this.updateCenterStrength(center);
+            }
+            
+            updateCenterStrength(strength) {
+                this.centerStrength = strength;
+                this.centerMagnet.strength = strength;
+                const mat = this.centerMagnet.mesh.material;
+                if (strength > 0) mat.color.setHex(0xef4444);
+                else if (strength < 0) mat.color.setHex(0x3b82f6);
+                else mat.color.setHex(0x888888);
+            }
+
+            update(deltaTime) {
+                // Apply gravity to linear motion
+                this.velocity.addScaledVector(GRAVITY, deltaTime);
+
+                // Linear motion (whole body)
+                this.velocity.multiplyScalar(DAMPING);
+                this.mesh.position.addScaledVector(this.velocity, deltaTime);
+                
+                // Rotational motion (whole body)
+                const rotationDelta = new THREE.Quaternion().setFromAxisAngle(
+                    this.angularVelocity.clone().normalize(),
+                    this.angularVelocity.length() * deltaTime
+                );
+                this.mesh.quaternion.multiplyQuaternions(rotationDelta, this.mesh.quaternion);
+                
+                // Independent motor-driven ring spin (visual)
+                this.outerRingAngle += this.outerRingSpeed * deltaTime;
+                this.innerRingAngle += this.innerRingSpeed * deltaTime;
+                this.outerRingMesh.rotation.z = this.outerRingAngle;
+                this.innerRingMesh.rotation.y = this.innerRingAngle;
+
+
+                this.handleBounds();
+            }
+            
+            applyForce(force, point) {
+                // Linear force
+                this.velocity.addScaledVector(force, 1 / this.mass);
+                // Torque
+                const torque = new THREE.Vector3().crossVectors(point, force);
+                this.angularVelocity.addScaledVector(torque, 1 / this.inertia);
+            }
+
+            handleBounds() { 
+                 const pos = this.mesh.position;
+                const radius = 85; // Approximate radius for bounding box check
+                if (pos.x - radius < simulationBounds.min.x || pos.x + radius > simulationBounds.max.x) {
+                    pos.x = Math.max(simulationBounds.min.x + radius, Math.min(simulationBounds.max.x - radius, pos.x)); this.velocity.x *= -0.7;
+                }
+                if (pos.y - radius < simulationBounds.min.y || pos.y + radius > simulationBounds.max.y) {
+                    pos.y = Math.max(simulationBounds.min.y + radius, Math.min(simulationBounds.max.y - radius, pos.y)); this.velocity.y *= -0.7;
+                }
+                if (pos.z - radius < simulationBounds.min.z || pos.z + radius > simulationBounds.max.z) {
+                   pos.z = Math.max(simulationBounds.min.z + radius, Math.min(simulationBounds.max.z - radius, pos.z)); this.velocity.z *= -0.7;
+                }
+             }
+            dispose() {
+                scene.remove(this.mesh);
+                this.centerMagnet.dispose();
+                this.outerRingMesh.geometry.dispose();
+                this.outerRingMesh.material.dispose();
+                this.innerRingMesh.geometry.dispose();
+                this.innerRingMesh.material.dispose();
+             }
+        }
+        
+        // --- Physics Loop ---
+        const clock = new THREE.Clock();
+        function updatePhysics() {
+            const deltaTime = Math.min(clock.getDelta(), 0.1); // Prevent large steps
+
+            // 1. Magnet-to-Magnet forces
+            for (let i = 0; i < electromagnets.length; i++) {
+                for (let j = i + 1; j < electromagnets.length; j++) {
+                    const m1 = electromagnets[i];
+                    const m2 = electromagnets[j];
+                    const direction = new THREE.Vector3().subVectors(m2.mesh.position, m1.mesh.position);
+                    const distSq = direction.lengthSq();
+                    if (distSq < 1) continue;
+                    
+                    const forceMag = -FORCE_CONSTANT * (m1.strength * m2.strength) / distSq;
+                    const force = direction.normalize().multiplyScalar(forceMag);
+                    m1.velocity.addScaledVector(force, 1 / m1.mass);
+                    m2.velocity.addScaledVector(force, -1 / m2.mass);
+                }
+            }
+
+            // 2. Gyroscope-to-Magnet forces
+            for (const gyro of gyroscopes) {
+                for (const magnet of electromagnets) {
+                    if (magnet === gyro.centerMagnet) continue; // Don't interact with own center
+                    let netForceOnMagnet = new THREE.Vector3();
+                    // Center core force
+                    const coreWorldPos = gyro.mesh.position; // Center magnet is at gyro's origin
+                    const dirToCore = new THREE.Vector3().subVectors(coreWorldPos, magnet.mesh.position);
+                    const distSqCore = dirToCore.lengthSq();
+                    if (distSqCore > 1) {
+                         const forceMag = -FORCE_CONSTANT * (gyro.centerStrength * magnet.strength) / distSqCore;
+                         const force = dirToCore.normalize().multiplyScalar(forceMag);
+                         netForceOnMagnet.add(force);
+                    }
+
+                    // Ring forces (approximated by sampling points on the spinning rings)
+                    const rings = [
+                        {strength: gyro.northStrength, radius: 80, axis: 'z', angle: gyro.outerRingAngle}, 
+                        {strength: -gyro.southStrength, radius: 50, axis: 'y', angle: gyro.innerRingAngle}
+                    ];
+                    rings.forEach(ring => {
+                        const ringSpinQuat = new THREE.Quaternion();
+                        if(ring.axis === 'z') ringSpinQuat.setFromAxisAngle(new THREE.Vector3(0, 0, 1), ring.angle);
+                        else ringSpinQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ring.angle);
+
+                        for(let i = 0; i < GYRO_RING_SAMPLES; i++) {
+                            const sampleAngle = (i / GYRO_RING_SAMPLES) * Math.PI * 2;
+                            const samplePointLocal = new THREE.Vector3();
+                            if(ring.axis === 'z') samplePointLocal.set(Math.cos(sampleAngle) * ring.radius, Math.sin(sampleAngle) * ring.radius, 0);
+                            else samplePointLocal.set(Math.cos(sampleAngle) * ring.radius, 0, Math.sin(sampleAngle) * ring.radius);
+                            
+                            // Apply independent ring spin, then whole-body orientation
+                            const samplePointWorld = samplePointLocal.clone()
+                                .applyQuaternion(ringSpinQuat)
+                                .applyQuaternion(gyro.mesh.quaternion)
+                                .add(gyro.mesh.position);
+
+                            const dirToSample = new THREE.Vector3().subVectors(samplePointWorld, magnet.mesh.position);
+                            const distSqSample = dirToSample.lengthSq();
+                            if(distSqSample < 1) continue;
+
+                            const forceMag = -FORCE_CONSTANT * ((ring.strength/GYRO_RING_SAMPLES) * magnet.strength) / distSqSample;
+                            const force = dirToSample.normalize().multiplyScalar(forceMag);
+                            netForceOnMagnet.add(force);
+                        }
+                    });
+                    
+                    // Apply forces
+                    magnet.velocity.addScaledVector(netForceOnMagnet, 1 / magnet.mass);
+                    const forcePointOnGyro = magnet.mesh.position.clone().sub(gyro.mesh.position);
+                    gyro.applyForce(netForceOnMagnet.multiplyScalar(-1), forcePointOnGyro);
+                }
+            }
+
+            // 3. Update positions and orientations
+            electromagnets.forEach(m => m.update(deltaTime));
+            gyroscopes.forEach(g => g.update(deltaTime));
+        }
+
+        // --- Main Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            updatePhysics();
+            controls.update();
+            updateAndDisplayStats();
+            renderer.render(scene, camera);
+        }
+
+        // --- UI & Interaction Handlers ---
+        function addMagnet(strength) {
+            const size = BASE_BOUNDS * simulationScale * 0.8;
+            const pos = new THREE.Vector3((Math.random()-0.5)*size, (Math.random()-0.5)*size, (Math.random()-0.5)*size);
+            electromagnets.push(new Electromagnet(pos, strength));
+        }
+
+        function addGyroscope() {
+            if (gyroscopes.length > 0) return; // Limit to one for now
+            const ns = parseFloat(gyroNorthStrengthSlider.value);
+            const ss = parseFloat(gyroSouthStrengthSlider.value);
+            const cs = parseFloat(gyroCenterStrengthSlider.value);
+            gyroscopes.push(new Gyroscope(new THREE.Vector3(0, 50, 0), ns, ss, cs));
+        }
+        
+        function clearAll() {
+            electromagnets.forEach(m => m.dispose());
+            electromagnets = [];
+            gyroscopes.forEach(g => g.dispose());
+            gyroscopes = [];
+        }
+        
+        addNorthBtn.addEventListener('click', () => addMagnet(parseFloat(strengthSlider.value)));
+        addSouthBtn.addEventListener('click', () => addMagnet(-parseFloat(strengthSlider.value)));
+        addGyroBtn.addEventListener('click', addGyroscope);
+        clearBtn.addEventListener('click', clearAll);
+        
+        const updateAllGyroStrengths = () => {
+             const ns = parseFloat(gyroNorthStrengthSlider.value);
+             const ss = parseFloat(gyroSouthStrengthSlider.value);
+             const cs = parseFloat(gyroCenterStrengthSlider.value);
+             gyroscopes.forEach(g => g.updateStrengths(ns, ss, cs));
+        };
+        strengthSlider.addEventListener('input', e => strengthValue.textContent = e.target.value);
+        gyroNorthStrengthSlider.addEventListener('input', e => { gyroNorthStrengthValue.textContent = e.target.value; updateAllGyroStrengths(); });
+        gyroSouthStrengthSlider.addEventListener('input', e => { gyroSouthStrengthValue.textContent = e.target.value; updateAllGyroStrengths(); });
+        gyroCenterStrengthSlider.addEventListener('input', e => { gyroCenterStrengthValue.textContent = e.target.value; updateAllGyroStrengths(); });
+        
+        sizeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                simulationScale = parseInt(btn.dataset.scale, 10);
+                const newSize = BASE_BOUNDS * simulationScale;
+                simulationBounds.set(new THREE.Vector3(-newSize, -newSize, -newSize), new THREE.Vector3(newSize, newSize, newSize));
+                
+                const boxHelper = scene.getObjectByProperty('type', 'Box3Helper');
+                if(boxHelper) { scene.remove(boxHelper); scene.add(new THREE.Box3Helper(simulationBounds, 0x888888)); }
+                const grid = scene.getObjectByProperty('type', 'GridHelper');
+                if(grid) grid.position.y = -newSize;
+                
+                clearAll();
+                addMagnet(parseFloat(strengthSlider.value));
+                sizeBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+
+        function onPointerDown(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const draggableMeshes = electromagnets.filter(m => gyroscopes.every(g => g.centerMagnet !== m)).map(m => m.mesh);
+            const intersects = raycaster.intersectObjects(draggableMeshes);
+            if (intersects.length > 0) {
+                controls.enabled = false;
+                selectedMagnet = intersects[0].object.userData.parent;
+                plane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(plane.normal), selectedMagnet.mesh.position);
+            }
+        }
+        
+        function onPointerMove(event) {
+            if (!selectedMagnet) return;
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersectionPoint = new THREE.Vector3();
+            raycaster.ray.intersectPlane(plane, intersectionPoint);
+            selectedMagnet.mesh.position.copy(intersectionPoint);
+            selectedMagnet.velocity.set(0,0,0);
+        }
+        
+        function onPointerUp() {
+            controls.enabled = true;
+            selectedMagnet = null;
+        }
+
+        function onWindowResize() {
+            if (camera && renderer && canvasContainer) {
+                camera.aspect = canvasContainer.clientWidth / canvasContainer.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+            }
+        }
+        
+        function updateAndDisplayStats() {
+            const allLooseMagnets = electromagnets.filter(m => gyroscopes.every(g => g.centerMagnet !== m));
+            statMagnets.textContent = allLooseMagnets.length + gyroscopes.length;
+            let totalEnergy = 0;
+            let maxStrength = 0;
+            allLooseMagnets.forEach(m => {
+                totalEnergy += 0.5 * m.mass * m.velocity.lengthSq();
+                if(Math.abs(m.strength) > maxStrength) maxStrength = Math.abs(m.strength);
+            });
+            gyroscopes.forEach(g => {
+                totalEnergy += 0.5 * g.mass * g.velocity.lengthSq();
+                const gyroMax = Math.max(Math.abs(g.northStrength), Math.abs(g.southStrength), Math.abs(g.centerStrength));
+                if(gyroMax > maxStrength) maxStrength = gyroMax;
+            });
+            statEnergy.textContent = (totalEnergy / 100000).toFixed(2);
+            statStrength.textContent = Math.round(maxStrength);
+        }
+
+        // --- Start ---
+        init();
+    </script>
+</body>
+</html>
+

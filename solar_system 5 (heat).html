@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orbital Sandbox</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #000000; color: #f0f0f0; overflow: hidden; }
+        #simulation-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        .panel { background-color: rgba(17, 24, 39, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(55, 65, 81, 0.5); border-radius: 0.75rem; z-index: 10; }
+        .controls-panel { position: fixed; top: 1rem; left: 1rem; padding: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; max-width: 340px; }
+        .info-panel { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); max-width: 800px; }
+        .info-panel-header { padding: 0.75rem 1.5rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(55, 65, 81, 0.5); }
+        .info-panel-content { padding: 1.5rem; overflow-y: auto; max-height: 200px; }
+        .input-group { display: flex; flex-direction: column; margin-bottom: 0.75rem; }
+        .input-group label { font-size: 0.875rem; margin-bottom: 0.25rem; color: #9ca3af; }
+        .input-group input, .input-group select, .input-group textarea { background-color: #374151; border: 1px solid #4b5563; border-radius: 0.375rem; padding: 0.5rem; color: #f0f0f0; font-size: 0.875rem; }
+        .btn { padding: 0.6rem 1.2rem; border-radius: 0.5rem; font-weight: 600; text-align: center; cursor: pointer; transition: all 0.2s ease-in-out; }
+        .btn:disabled { cursor: not-allowed; opacity: 0.5; }
+        .btn-primary { background-color: #3b82f6; color: white; }
+        .btn-primary:hover:not(:disabled) { background-color: #2563eb; }
+        .btn-secondary { background-color: #6b7280; color: white; }
+        .btn-secondary:hover:not(:disabled) { background-color: #4b5563; }
+        .score-panel { position: fixed; top: 1rem; right: 1rem; text-align: center; padding: 1rem 1.5rem; }
+        .score-label { font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem; }
+        .score-value { font-size: 1.875rem; font-weight: 700; line-height: 1; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="simulation-container"></div>
+    <div class="controls-panel panel">
+        <h2 class="text-xl font-bold mb-4">Orbital Sandbox</h2>
+        <div class="input-group">
+            <label for="weeks">Weeks to Simulate:</label>
+            <input type="number" id="weeks" value="1040" min="52" max="10400">
+        </div>
+        <div class="input-group">
+            <label for="speed">Simulation Speed (steps/frame):</label>
+            <input type="range" id="speed" min="1" max="100" value="10" class="w-full">
+        </div>
+        <div class="flex flex-wrap gap-2 mb-4">
+            <button id="start-sim" class="btn btn-primary flex-grow">Start</button>
+            <button id="reset-sim" class="btn btn-secondary flex-grow">Reset Sim</button>
+        </div>
+        <div class="input-group">
+            <label class="flex items-center space-x-2"><input type="checkbox" id="show-heatmap" checked><span>Show Gravitational Heat Map</span></label>
+        </div>
+        <h3 class="text-lg font-semibold mb-2">Load Mass Model</h3>
+        <div class="grid grid-cols-2 gap-2 mb-4">
+             <button id="model-standard" class="btn btn-secondary text-sm">Standard</button>
+             <button id="model-dancers" class="btn btn-secondary text-sm">Linked Dancers</button>
+             <button id="toggle-p9" class="btn btn-secondary text-sm col-span-2">Toggle Planet Nine</button>
+        </div>
+        <div class="input-group">
+            <label for="custom-mass-input">Custom Masses (comma-separated, in Mercs):</label>
+            <textarea id="custom-mass-input" class="font-mono text-xs" rows="3" placeholder="1, 2.86, 8.18, 23.4, ..."></textarea>
+            <button id="apply-custom-mass" class="btn btn-primary mt-2">Apply Custom</button>
+        </div>
+        <h3 class="text-lg font-semibold mt-4 mb-2">Manual Mass Override (in Mercs)</h3>
+        <div id="masses-container" class="space-y-3"></div>
+    </div>
+    <div class="score-panel panel">
+        <div class="score-label">Stability Score</div>
+        <div id="score-value" class="score-value">0</div>
+    </div>
+    <div class="info-panel panel">
+        <div class="info-panel-header" id="info-toggle">
+            <h2 class="text-xl font-bold">Physics Visualization</h2>
+            <span id="toggle-icon">[- HIDE]</span>
+        </div>
+        <div class="info-panel-content" id="info-content">
+             <p class="text-sm text-gray-300">
+                This simulation visualizes the gravitational "tug-of-war" and "heat" on each planet:<br><br>
+                - <span class="text-blue-400 font-semibold">BLUE VECTOR:</span> The Sun's powerful inward pull.<br>
+                - <span class="text-fuchsia-400 font-semibold">MAGENTA VECTOR:</span> The combined tug from all other planetary "companions."<br>
+                - <span class="text-red-400 font-semibold">HEAT MAP:</span> The color of the grid shows the intensity of the combined planetary gravity. <span class="text-blue-400">Cool</span> colors mean low, balanced forces. <span class="text-yellow-400">Hot</span> colors reveal the location of gravitational "bullies."
+            </p>
+        </div>
+    </div>
+
+    <script type="importmap">{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js","three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"}}</script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls, simulationFrameId, heatmapMesh;
+        const container = document.getElementById('simulation-container');
+        const G = 6.67430e-11, AU = 1.496e11, SCALE = 250 / (40 * AU);
+        const TIMESTEP = 60 * 60 * 24 * 7;
+        const MAX_TRAIL_POINTS = 10400;
+        const M_MERCURY = 0.330e24;
+        let simulationRunning = false, baselineDeviation = 0, isPlanetNineActive = false;
+        
+        const realMasses = { Sun:1.989e30, Mercury:0.330e24, Venus:4.87e24, Earth:5.97e24, Mars:0.642e24, Ceres:0.000938e24, Jupiter:1898e24, Saturn:568e24, Uranus:86.8e24, Neptune:102e24, Pluto:0.01303e24 };
+        const modelPresets = {
+            standard: null,
+            dancers: { Mercury: 1, Venus: 2.86, Earth: 8.18, Mars: 23.4, Ceres: 67.0, Jupiter: 191.8, Saturn: 549.3, Uranus: 1573, Neptune: 4505, Pluto: 12900 }
+        };
+
+        const initialBodiesData = [
+            { name: 'Sun', radius: 696340e3, color: 0xffcc33, isSun: true },
+            { name: 'Mercury', radius: 2439.7e3, color: 0x8c8c8c, distance: 0.387 * AU, initialAngle: 0 }, { name: 'Venus', radius: 6051.8e3, color: 0xd4a46a, distance: 0.723 * AU, initialAngle: 35 },
+            { name: 'Earth', radius: 6371e3, color: 0x4f4faf, distance: 1 * AU, initialAngle: 70 }, { name: 'Mars', radius: 3389.5e3, color: 0xc1440e, distance: 1.52 * AU, initialAngle: 105 },
+            { name: 'Ceres', radius: 473e3, color: 0x5c5c5c, distance: 2.77 * AU, initialAngle: 140 }, { name: 'Jupiter', radius: 69911e3, color: 0xc8ab89, distance: 5.2 * AU, initialAngle: 175 },
+            { name: 'Saturn', radius: 58232e3, color: 0xe3d9b1, distance: 9.58 * AU, initialAngle: 210 }, { name: 'Uranus', radius: 25362e3, color: 0xace5ee, distance: 19.22 * AU, initialAngle: 245 },
+            { name: 'Neptune', radius: 24622e3, color: 0x3f54ba, distance: 30.05 * AU, initialAngle: 280 }, { name: 'Pluto', radius: 1188.3e3, color: 0xbfab9f, distance: 39.5 * AU, initialAngle: 315 },
+            { name: 'Planet Nine', mass: 10 * 5.97e24, radius: 15000e3, color: 0x3a5a9a, distance: 400 * AU, initialAngle: 180, eccentricity: 0.4 }
+        ];
+
+        let bodies = [];
+
+        async function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 50000);
+            camera.position.set(200, 200, 200);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            container.appendChild(renderer.domElement);
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            generateMassInputs();
+            setupEventListeners();
+            await resetSimulation();
+            animate();
+        }
+        
+        function generateMassInputs() {
+            const container = document.getElementById('masses-container');
+            container.innerHTML = '';
+            initialBodiesData.forEach(bodyData => {
+                if (bodyData.isSun || bodyData.name === 'Planet Nine') return;
+                const div = document.createElement('div');
+                div.className = 'input-group';
+                div.innerHTML = `<label for="mass-${bodyData.name}">${bodyData.name}</label><input type="number" id="mass-${bodyData.name}" step="0.01">`;
+                container.appendChild(div);
+            });
+        }
+        
+        function setupSceneFromBodies(bodiesToDraw) {
+            while(scene.children.length > 0) scene.remove(scene.children[0]); 
+            scene.add(new THREE.AmbientLight(0x404040, 1.5));
+            bodiesToDraw.forEach(body => {
+                const scaledRadius = Math.max(1, body.radius * SCALE * (body.isSun ? 0.05 : 1000));
+                body.mesh = new THREE.Mesh(new THREE.SphereGeometry(scaledRadius, 16, 16), body.isSun ? new THREE.MeshBasicMaterial({ color: body.color }) : new THREE.MeshStandardMaterial({ color: body.color, roughness: 0.8 }));
+                scene.add(body.mesh);
+                if (body.isSun) scene.add(new THREE.PointLight(0xffffff, 3, 20000 * SCALE));
+                else {
+                    const createTrail = (color, opacity) => {
+                        const geom = new THREE.BufferGeometry();
+                        geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAX_TRAIL_POINTS * 3), 3));
+                        return new THREE.Line(geom, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
+                    };
+                    body.trail = createTrail(0xffffff, 0.4);
+                    body.sunForceVector = new THREE.ArrowHelper(new THREE.Vector3(1,0,0), new THREE.Vector3(), 1, 0x60a5fa);
+                    body.planetForceVector = new THREE.ArrowHelper(new THREE.Vector3(1,0,0), new THREE.Vector3(), 1, 0xf472b6);
+                    scene.add(body.trail, body.sunForceVector, body.planetForceVector);
+                }
+            });
+
+            const planeSize = 80 * AU * SCALE;
+            const planeSegments = 100;
+            const planeGeom = new THREE.PlaneGeometry(planeSize, planeSize, planeSegments, planeSegments);
+            const colors = new Float32Array(planeGeom.attributes.position.count * 3);
+            planeGeom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            const planeMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5 });
+            heatmapMesh = new THREE.Mesh(planeGeom, planeMat);
+            heatmapMesh.rotation.x = -Math.PI / 2;
+            scene.add(heatmapMesh);
+        }
+
+        async function resetSimulation() {
+            stopSimulation();
+            applyMassModel('standard');
+            document.getElementById('start-sim').disabled = true; document.getElementById('reset-sim').disabled = true;
+            document.getElementById('start-sim').textContent = 'Calculating...';
+            bodies = createBodyObjects();
+            setupSceneFromBodies(bodies);
+            await new Promise(resolve => setTimeout(resolve, 10));
+            await calculateBaselinePaths();
+            document.getElementById('score-value').textContent = '0';
+            document.getElementById('start-sim').disabled = false; document.getElementById('reset-sim').disabled = false;
+            document.getElementById('start-sim').textContent = 'Start';
+        }
+
+        function createBodyObjects() {
+            const dataToUse = isPlanetNineActive ? initialBodiesData : initialBodiesData.filter(d => d.name !== 'Planet Nine');
+            return dataToUse.map(data => {
+                const mass = realMasses[data.name] || data.mass;
+                const { position, velocity } = getInitialState(data, realMasses['Sun']);
+                return { ...data, mass, position, velocity, acceleration: new THREE.Vector3() };
+            });
+        }
+        
+        function cloneBodies(bodiesToClone) { return bodiesToClone.map(body => ({ ...body, mass: body.mass, position: body.position.clone(), velocity: body.velocity.clone(), acceleration: new THREE.Vector3() })); }
+
+        async function calculateBaselinePaths() {
+            const totalWeeks = parseInt(document.getElementById('weeks').value, 10);
+            const baselineBodies = createBodyObjects();
+            let totalDeviation = 0;
+            const sun = baselineBodies.find(b => b.isSun);
+            for (let week = 0; week < totalWeeks; week++) {
+                updatePhysics(baselineBodies, TIMESTEP);
+                baselineBodies.forEach((body) => {
+                    if (!body.isSun) {
+                        const idealPos = getIdealPosition(body, week * TIMESTEP, sun.mass);
+                        totalDeviation += body.position.distanceTo(idealPos);
+                    }
+                });
+            }
+            baselineDeviation = totalDeviation;
+        }
+        
+        function updatePhysics(bodyList, dt) {
+            const half_dt = dt * 0.5;
+            bodyList.forEach(body => {
+                if (!body.isSun) {
+                    body.velocity.add(body.acceleration.clone().multiplyScalar(half_dt));
+                    body.position.add(body.velocity.clone().multiplyScalar(dt));
+                }
+            });
+            const forces = bodyList.map(() => new THREE.Vector3());
+            for (let i = 0; i < bodyList.length; i++) {
+                for (let j = i + 1; j < bodyList.length; j++) {
+                    const dVec = new THREE.Vector3().subVectors(bodyList[j].position, bodyList[i].position);
+                    const dSq = dVec.lengthSq();
+                    if (dSq > 1e12) {
+                        const fMag = (G * bodyList[i].mass * bodyList[j].mass) / dSq;
+                        const fVec = dVec.normalize().multiplyScalar(fMag);
+                        forces[i].add(fVec);
+                        forces[j].sub(fVec);
+                    }
+                }
+            }
+            bodyList.forEach((body, i) => {
+                if (!body.isSun) {
+                    const new_acceleration = forces[i].clone().divideScalar(body.mass);
+                    body.velocity.add(new_acceleration.clone().multiplyScalar(half_dt));
+                    body.acceleration.copy(new_acceleration);
+                }
+            });
+        }
+
+        function getIdealPosition(body, time, sunMass) {
+            const { distance, e = 0, initialAngle } = initialBodiesData.find(d => d.name === body.name);
+            const a = distance;
+            const period = 2 * Math.PI * Math.sqrt(Math.pow(a, 3) / (G * sunMass));
+            const meanMotion = 2 * Math.PI / period;
+            const meanAnomaly = (initialAngle || 0) * Math.PI / 180 + meanMotion * time;
+            let E = meanAnomaly; for(let i=0; i<5; i++) E = meanAnomaly + e * Math.sin(E);
+            const x = a * (Math.cos(E) - e), z = a * Math.sqrt(1 - e**2) * Math.sin(E);
+            return new THREE.Vector3(x, 0, z);
+        }
+
+        function getInitialState(body, sunMass) {
+            if (body.isSun) return { position: new THREE.Vector3(), velocity: new THREE.Vector3(), acceleration: new THREE.Vector3() };
+            const pos = getIdealPosition(body, 0, sunMass);
+            const r = pos.length();
+            const speed = Math.sqrt(G * sunMass * ((2/r) - (1/body.distance)));
+            const angle = Math.atan2(pos.z, pos.x) + Math.PI / 2;
+            const vel = new THREE.Vector3(speed * Math.cos(angle), 0, speed * Math.sin(angle));
+            return { position: pos, velocity: vel, acceleration: new THREE.Vector3() };
+        }
+
+        function startSimulation() {
+            const totalWeeks = parseInt(document.getElementById('weeks').value, 10);
+            bodies.forEach(body => {
+                const input = document.getElementById(`mass-${body.name}`);
+                if (input) body.mass = parseFloat(input.value) * M_MERCURY;
+                const sunMass = bodies.find(b=>b.isSun).mass;
+                const { position, velocity } = getInitialState(initialBodiesData.find(d=>d.name === body.name), sunMass);
+                body.position.copy(position); body.velocity.copy(velocity); body.acceleration.set(0,0,0);
+                if (!body.isSun) body.trail.geometry.setDrawRange(0, 0);
+            });
+            updatePhysics(bodies, 0); 
+            let currentWeek = 0, currentDeviation = 0;
+            const sun = bodies.find(b => b.isSun);
+            simulationRunning = true;
+            document.getElementById('start-sim').textContent = 'Stop';
+
+            function runStep() {
+                if (!simulationRunning) return;
+                const speed = parseInt(document.getElementById('speed').value, 10);
+                for (let i = 0; i < speed; i++) {
+                    if (currentWeek >= totalWeeks) {
+                        stopSimulation();
+                        const score = baselineDeviation - currentDeviation;
+                        document.getElementById('score-value').textContent = Math.round(score / 1e12).toLocaleString();
+                        return;
+                    }
+                    updatePhysics(bodies, TIMESTEP);
+                    bodies.forEach(body => {
+                        if (!body.isSun) {
+                            const trailPos = body.trail.geometry.attributes.position.array;
+                            const index = currentWeek % MAX_TRAIL_POINTS;
+                            trailPos[index * 3] = body.position.x * SCALE;
+                            trailPos[index * 3 + 1] = body.position.y * SCALE;
+                            trailPos[index * 3 + 2] = body.position.z * SCALE;
+                            const idealPos = getIdealPosition(body, currentWeek * TIMESTEP, sun.mass);
+                            currentDeviation += body.position.distanceTo(idealPos);
+                        }
+                    });
+                    currentWeek++;
+                }
+                bodies.forEach(body => {
+                    if (!body.isSun) {
+                        body.trail.geometry.setDrawRange(0, Math.min(MAX_TRAIL_POINTS, currentWeek));
+                        body.trail.geometry.attributes.position.needsUpdate = true;
+                    }
+                });
+                simulationFrameId = requestAnimationFrame(runStep);
+            }
+            runStep();
+        }
+        function stopSimulation() {
+            simulationRunning = false;
+            if (simulationFrameId) cancelAnimationFrame(simulationFrameId);
+            document.getElementById('start-sim').textContent = 'Start';
+        }
+        
+        function updateForceVisuals() {
+            const sun = bodies.find(b => b.isSun); if (!sun) return;
+            const forceScaleLog = 1e-23;
+
+            bodies.forEach(body => {
+                if(body.isSun) return;
+                
+                body.mesh.position.copy(body.position).multiplyScalar(SCALE);
+
+                const sunForceVec = new THREE.Vector3().subVectors(sun.position, body.position);
+                const sunForceMag = (G * sun.mass * body.mass) / sunForceVec.lengthSq();
+                body.sunForceVector.position.copy(body.mesh.position);
+                body.sunForceVector.setDirection(sunForceVec.normalize());
+                body.sunForceVector.setLength(Math.log10(sunForceMag / forceScaleLog));
+                
+                const planetForceVec = new THREE.Vector3();
+                bodies.forEach(otherBody => {
+                    if (otherBody === body || otherBody.isSun) return;
+                    const dVec = new THREE.Vector3().subVectors(otherBody.position, body.position);
+                    planetForceVec.add(dVec.normalize().multiplyScalar((G * otherBody.mass * body.mass) / dVec.lengthSq()));
+                });
+                const planetForceMag = planetForceVec.length();
+                body.planetForceVector.position.copy(body.mesh.position);
+                body.planetForceVector.setDirection(planetForceVec.normalize());
+                body.planetForceVector.setLength(Math.log10(planetForceMag / forceScaleLog + 1) * 2);
+            });
+        }
+
+        function updateHeatmap() {
+            heatmapMesh.visible = document.getElementById('show-heatmap').checked;
+            if(!heatmapMesh.visible) return;
+
+            const positions = heatmapMesh.geometry.attributes.position;
+            const colors = heatmapMesh.geometry.attributes.color;
+            const worldPos = new THREE.Vector3();
+            const potentials = [];
+            const activeBodies = bodies.filter(b => !b.isSun);
+
+            for (let i = 0; i < positions.count; i++) {
+                worldPos.fromBufferAttribute(positions, i);
+                worldPos.applyMatrix4(heatmapMesh.matrixWorld);
+                worldPos.divideScalar(SCALE);
+                let potential = 0;
+                activeBodies.forEach(body => {
+                    const dSq = body.position.distanceToSquared(worldPos);
+                    if (dSq > 1e20) potential -= (G * body.mass) / Math.sqrt(dSq);
+                });
+                potentials.push(potential);
+            }
+
+            const minPot = Math.min(...potentials.filter(p => isFinite(p)));
+            const maxPot = Math.max(...potentials.filter(p => isFinite(p)));
+            const range = maxPot - minPot;
+            
+            const blue = new THREE.Color(0x0000ff), green = new THREE.Color(0x00ff00), yellow = new THREE.Color(0xffff00), red = new THREE.Color(0xff0000);
+            const tempColor = new THREE.Color();
+
+            for (let i = 0; i < potentials.length; i++) {
+                const normalized = (potentials[i] - minPot) / range;
+                if (normalized < 0.33) tempColor.lerpColors(blue, green, normalized * 3);
+                else if (normalized < 0.66) tempColor.lerpColors(green, yellow, (normalized - 0.33) * 3);
+                else tempColor.lerpColors(yellow, red, (normalized - 0.66) * 3);
+                colors.setXYZ(i, tempColor.r, tempColor.g, tempColor.b);
+            }
+            colors.needsUpdate = true;
+        }
+
+        function animate() { 
+            requestAnimationFrame(animate); 
+            if (simulationRunning) {
+                 bodies.forEach(body => { if (!body.isSun) body.mesh.position.copy(body.position).multiplyScalar(SCALE); });
+            }
+            updateForceVisuals();
+            updateHeatmap();
+            controls.update(); 
+            renderer.render(scene, camera); 
+        }
+        
+        function applyMassModel(modelName) {
+            const massData = modelPresets[modelName];
+            initialBodiesData.forEach(bodyData => {
+                if(bodyData.isSun || bodyData.name === 'Planet Nine') return;
+                const input = document.getElementById(`mass-${bodyData.name}`);
+                if (!input) return;
+                let massInMercs;
+                if (massData && massData[bodyData.name] !== undefined) { massInMercs = massData[bodyData.name]; }
+                else { massInMercs = realMasses[bodyData.name] / M_MERCURY; }
+                input.value = massInMercs.toPrecision(4);
+            });
+        }
+        
+        function setupEventListeners() {
+            document.getElementById('start-sim').addEventListener('click', () => simulationRunning ? stopSimulation() : startSimulation());
+            document.getElementById('reset-sim').addEventListener('click', resetSimulation);
+            Object.keys(modelPresets).forEach(key => {
+                const btn = document.getElementById(`model-${key}`);
+                if(btn) btn.addEventListener('click', () => applyMassModel(key));
+            });
+            document.getElementById('toggle-p9').addEventListener('click', () => {
+                isPlanetNineActive = !isPlanetNineActive;
+                document.getElementById('toggle-p9').classList.toggle('bg-blue-600', isPlanetNineActive);
+                document.getElementById('toggle-p9').classList.toggle('bg-gray-600', !isPlanetNineActive);
+                resetSimulation();
+            });
+            document.getElementById('info-toggle').addEventListener('click', () => {
+                const content = document.getElementById('info-content'), icon = document.getElementById('toggle-icon');
+                const isVisible = content.style.display !== 'none';
+                content.style.display = isVisible ? 'none' : 'block';
+                icon.textContent = isVisible ? '[+ SHOW]' : '[- HIDE]';
+            });
+            document.getElementById('apply-custom-mass').addEventListener('click', () => {
+                const inputString = document.getElementById('custom-mass-input').value;
+                const massValues = inputString.split(',').map(s => parseFloat(s.trim()));
+                const planetOrder = ['Mercury', 'Venus', 'Earth', 'Mars', 'Ceres', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
+                planetOrder.forEach((planetName, index) => {
+                    if (index < massValues.length && !isNaN(massValues[index])) {
+                        const inputElement = document.getElementById(`mass-${planetName}`);
+                        if (inputElement) inputElement.value = massValues[index].toPrecision(4);
+                    }
+                });
+            });
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+        
+        init();
+    </script>
+</body>
+</html>
+

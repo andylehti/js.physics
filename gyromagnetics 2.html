@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Interactive Magnet Simulation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            touch-action: none;
+        }
+        #simulationCanvas {
+            cursor: grab;
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #simulationCanvas:active {
+            cursor: grabbing;
+        }
+        .panel {
+            background-color: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(209, 213, 219, 0.5);
+        }
+        .btn {
+            transition: all 0.2s ease-in-out;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .btn:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .size-btn.active {
+            background-color: #4f46e5;
+            color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            transform: translateY(-1px);
+        }
+        input[type="range"] {
+            -webkit-appearance: none; appearance: none;
+            width: 100%; height: 8px; background: #d1d5db; border-radius: 5px;
+            outline: none; opacity: 0.7; transition: opacity .2s;
+        }
+        input[type="range"]:hover { opacity: 1; }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none;
+            width: 20px; height: 20px; background: #4f46e5; cursor: pointer;
+            border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 20px; height: 20px; background: #4f46e5; cursor: pointer;
+            border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4 overflow-hidden">
+
+    <div class="w-full max-w-7xl mx-auto">
+        <div class="flex justify-between items-start mb-2">
+            <header class="text-left">
+                <h1 class="text-3xl md:text-4xl font-bold text-gray-800">3D Magnet Simulation</h1>
+                <p class="text-gray-600 mt-1">Click and drag to rotate. Scroll to zoom. Right-click to pan.</p>
+            </header>
+            
+            <div id="stats-panel" class="panel p-3 rounded-lg shadow-md text-sm text-gray-700 font-mono w-60 flex-shrink-0 hidden sm:block">
+                <h3 class="font-bold text-base mb-2 text-gray-800 border-b pb-1">System Stats</h3>
+                <p>Magnets: <span id="stat-magnets" class="font-semibold text-indigo-600">0</span></p>
+                <p>Kinetic Energy: <span id="stat-energy" class="font-semibold text-indigo-600">0.00</span></p>
+                <p>Strongest Pole: <span id="stat-strength" class="font-semibold text-indigo-600">0</span></p>
+            </div>
+        </div>
+        
+        <div class="flex justify-center mb-4">
+            <div class="panel p-2 rounded-xl shadow-md flex items-center gap-2">
+                <span class="font-medium text-gray-700 text-sm ml-2">Volume:</span>
+                <button class="size-btn btn bg-white font-semibold py-1 px-3 text-sm rounded-lg shadow active" data-scale="1">1x</button>
+                <button class="size-btn btn bg-white font-semibold py-1 px-3 text-sm rounded-lg shadow" data-scale="2">2x</button>
+                <button class="size-btn btn bg-white font-semibold py-1 px-3 text-sm rounded-lg shadow" data-scale="4">4x</button>
+            </div>
+        </div>
+
+        <div id="canvas-container" class="relative w-full aspect-video bg-white rounded-xl shadow-lg border border-gray-200">
+            <!-- Canvas is inserted here by Three.js -->
+            
+            <div class="absolute bottom-4 left-1/2 -translate-x-1/2 w-11/12 max-w-xl">
+                 <div class="panel p-3 rounded-xl shadow-md flex flex-col sm:flex-row items-center justify-center flex-wrap gap-4">
+                    <div class="flex items-center gap-3">
+                        <button id="addNorth" class="btn bg-red-500 text-white font-bold py-2 w-12 h-10 rounded-lg shadow-md text-xl">Add +</button>
+                        <button id="addSouth" class="btn bg-blue-500 text-white font-bold py-2 w-12 h-10 rounded-lg shadow-md text-xl">Add -</button>
+                    </div>
+                    
+                    <div class="flex-grow w-full sm:w-auto flex items-center gap-2">
+                         <label for="strengthSlider" class="font-medium text-gray-700 text-sm whitespace-nowrap">Strength:</label>
+                         <input type="range" id="strengthSlider" min="1" max="200" value="1" class="w-full">
+                         <span id="strengthValue" class="font-bold text-indigo-600 w-10 text-center text-sm">1</span>
+                    </div>
+
+                     <button id="clear" class="btn bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md text-sm">Clear</button>
+                 </div>
+            </div>
+        </div>
+    </div>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        const canvasContainer = document.getElementById('canvas-container');
+        // UI Controls
+        const addNorthBtn = document.getElementById('addNorth');
+        const addSouthBtn = document.getElementById('addSouth');
+        const clearBtn = document.getElementById('clear');
+        const strengthSlider = document.getElementById('strengthSlider');
+        const strengthValue = document.getElementById('strengthValue');
+        const sizeBtns = document.querySelectorAll('.size-btn');
+        // Stats
+        const statMagnets = document.getElementById('stat-magnets');
+        const statEnergy = document.getElementById('stat-energy');
+        const statStrength = document.getElementById('stat-strength');
+
+        let magnets = [];
+        let scene, camera, renderer, controls;
+        let raycaster, mouse;
+        let selectedMagnet = null;
+        let plane;
+        
+        let simulationScale = 1;
+        const BASE_BOUNDS = 200;
+        let simulationBounds = new THREE.Box3(
+            new THREE.Vector3(-BASE_BOUNDS, -BASE_BOUNDS, -BASE_BOUNDS),
+            new THREE.Vector3(BASE_BOUNDS, BASE_BOUNDS, BASE_BOUNDS)
+        );
+
+        // --- Simulation Constants ---
+        const FORCE_CONSTANT = 500000;
+        const MAGNET_BASE_RADIUS = 10;
+        const DAMPING = 0.98;
+
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf0f0f0);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, canvasContainer.clientWidth / canvasContainer.clientHeight, 0.1, 5000);
+            camera.position.set(250, 200, 450);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            canvasContainer.appendChild(renderer.domElement);
+            renderer.domElement.id = 'simulationCanvas';
+
+            // Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            directionalLight.position.set(100, 200, 300);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+
+            // Ground Plane and Grid
+            const grid = new THREE.GridHelper(BASE_BOUNDS * 2 * 4, 20);
+            grid.position.y = -BASE_BOUNDS * simulationScale;
+            scene.add(grid);
+
+            // Bounding Box Visual
+            const boxHelper = new THREE.Box3Helper(simulationBounds, 0x888888);
+            scene.add(boxHelper);
+            
+            // Raycasting
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+            plane = new THREE.Plane();
+
+            // Handle Resize
+            function onWindowResize() {
+                if (camera && renderer && canvasContainer) {
+                    camera.aspect = canvasContainer.clientWidth / canvasContainer.clientHeight;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+                }
+            }
+            window.addEventListener('resize', onWindowResize);
+
+
+            // --- 3D Interaction Event Listeners ---
+            renderer.domElement.addEventListener('pointerdown', onMouseDown);
+            renderer.domElement.addEventListener('pointermove', onMouseMove);
+            renderer.domElement.addEventListener('pointerup', onMouseUp);
+
+            // Initial Magnet
+            addMagnet(1);
+            
+            // Animation Loop
+            animate();
+        }
+        
+        class Magnet {
+            constructor(position, strength) {
+                this.strength = strength;
+                this.radius = MAGNET_BASE_RADIUS * (1 + Math.abs(strength) / 200);
+                
+                const geometry = new THREE.SphereGeometry(this.radius, 32, 16);
+                const material = new THREE.MeshStandardMaterial({
+                    color: this.strength > 0 ? 0xef4444 : 0x3b82f6,
+                    metalness: 0.3,
+                    roughness: 0.4
+                });
+
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.mesh.position.copy(position);
+                this.mesh.castShadow = true;
+                this.mesh.receiveShadow = true;
+                this.mesh.userData.magnet = this; // Link back to this class instance
+
+                this.velocity = new THREE.Vector3();
+                scene.add(this.mesh);
+            }
+
+            updatePosition() {
+                this.velocity.multiplyScalar(DAMPING);
+                this.mesh.position.add(this.velocity);
+            }
+
+            handleBounds() {
+                const pos = this.mesh.position;
+                if (pos.x - this.radius < simulationBounds.min.x || pos.x + this.radius > simulationBounds.max.x) {
+                    pos.x = Math.max(simulationBounds.min.x + this.radius, Math.min(simulationBounds.max.x - this.radius, pos.x));
+                    this.velocity.x *= -0.7;
+                }
+                if (pos.y - this.radius < simulationBounds.min.y || pos.y + this.radius > simulationBounds.max.y) {
+                    pos.y = Math.max(simulationBounds.min.y + this.radius, Math.min(simulationBounds.max.y - this.radius, pos.y));
+                    this.velocity.y *= -0.7;
+                }
+                if (pos.z - this.radius < simulationBounds.min.z || pos.z + this.radius > simulationBounds.max.z) {
+                   pos.z = Math.max(simulationBounds.min.z + this.radius, Math.min(simulationBounds.max.z - this.radius, pos.z));
+                   this.velocity.z *= -0.7;
+                }
+            }
+            
+            dispose() {
+                scene.remove(this.mesh);
+                this.mesh.geometry.dispose();
+                this.mesh.material.dispose();
+            }
+        }
+
+        function updatePhysics() {
+            for (let i = 0; i < magnets.length; i++) {
+                const m1 = magnets[i];
+                if (m1 === selectedMagnet) continue;
+
+                for (let j = i + 1; j < magnets.length; j++) {
+                    const m2 = magnets[j];
+                    if (m2 === selectedMagnet) continue;
+                    
+                    const direction = new THREE.Vector3().subVectors(m2.mesh.position, m1.mesh.position);
+                    const distSq = direction.lengthSq();
+
+                    if (distSq > 1) {
+                         const forceMagnitude = -FORCE_CONSTANT * (m1.strength * m2.strength) / distSq;
+                         const force = direction.normalize().multiplyScalar(forceMagnitude);
+                         m1.velocity.add(force);
+                         m2.velocity.sub(force);
+                    }
+
+                    // Collision
+                    const minDist = m1.radius + m2.radius;
+                    if (distSq < minDist * minDist) {
+                       // A simple collision resolution
+                        const dist = Math.sqrt(distSq);
+                        const overlap = minDist - dist;
+                        const normal = direction.normalize();
+                        
+                        m1.mesh.position.addScaledVector(normal, -overlap * 0.5);
+                        m2.mesh.position.addScaledVector(normal, overlap * 0.5);
+
+                        const v1n = m1.velocity.dot(normal);
+                        const v2n = m2.velocity.dot(normal);
+                        
+                        m1.velocity.addScaledVector(normal, v2n - v1n);
+                        m2.velocity.addScaledVector(normal, v1n - v2n);
+                    }
+                }
+            }
+        }
+        
+        function updateAndDisplayStats() {
+            statMagnets.textContent = magnets.length;
+            let totalEnergy = 0;
+            let maxStrength = 0;
+            magnets.forEach(m => {
+                const v = m.velocity.length();
+                const mass = Math.PI * m.radius * m.radius;
+                totalEnergy += 0.5 * mass * v * v;
+                if (Math.abs(m.strength) > maxStrength) maxStrength = Math.abs(m.strength);
+            });
+            statEnergy.textContent = (totalEnergy / 10000).toFixed(2);
+            statStrength.textContent = maxStrength;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            
+            updatePhysics();
+            
+            magnets.forEach(magnet => {
+                if (magnet !== selectedMagnet) {
+                    magnet.updatePosition();
+                }
+                magnet.handleBounds();
+            });
+            
+            updateAndDisplayStats();
+
+            renderer.render(scene, camera);
+        }
+
+        // --- UI Logic ---
+        function addMagnet(strength) {
+            const size = BASE_BOUNDS * simulationScale * 0.8;
+            const position = new THREE.Vector3(
+                (Math.random() - 0.5) * size,
+                (Math.random() - 0.5) * size,
+                (Math.random() - 0.5) * size
+            );
+            magnets.push(new Magnet(position, strength));
+        }
+        
+        function clearMagnets() {
+            magnets.forEach(m => m.dispose());
+            magnets = [];
+        }
+
+        // Event Listeners
+        addNorthBtn.addEventListener('click', () => addMagnet(parseFloat(strengthSlider.value)));
+        addSouthBtn.addEventListener('click', () => addMagnet(-parseFloat(strengthSlider.value)));
+        clearBtn.addEventListener('click', clearMagnets);
+        strengthSlider.addEventListener('input', (e) => strengthValue.textContent = e.target.value);
+        
+        sizeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const scale = parseInt(btn.dataset.scale, 10);
+                simulationScale = scale;
+                const newSize = BASE_BOUNDS * scale;
+                simulationBounds.set(
+                    new THREE.Vector3(-newSize, -newSize, -newSize),
+                    new THREE.Vector3(newSize, newSize, newSize)
+                );
+                
+                // Update helpers
+                const boxHelper = scene.getObjectByProperty('type', 'Box3Helper');
+                if(boxHelper) scene.remove(boxHelper);
+                scene.add(new THREE.Box3Helper(simulationBounds, 0x888888));
+                
+                const grid = scene.getObjectByProperty('type', 'GridHelper');
+                if(grid) grid.position.y = -newSize;
+
+                clearMagnets();
+                addMagnet(parseFloat(strengthSlider.value));
+
+                sizeBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+        
+        // --- 3D Interaction ---
+        function onMouseDown(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(magnets.map(m => m.mesh));
+            
+            if (intersects.length > 0) {
+                controls.enabled = false;
+                selectedMagnet = intersects[0].object.userData.magnet;
+                plane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(plane.normal), selectedMagnet.mesh.position);
+            }
+        }
+        
+        function onMouseMove(event) {
+            if (selectedMagnet === null) return;
+            
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            raycaster.setFromCamera(mouse, camera);
+            const intersectionPoint = new THREE.Vector3();
+            raycaster.ray.intersectPlane(plane, intersectionPoint);
+            selectedMagnet.mesh.position.copy(intersectionPoint);
+            selectedMagnet.velocity.set(0,0,0);
+        }
+        
+        function onMouseUp() {
+            controls.enabled = true;
+            selectedMagnet = null;
+        }
+
+        init();
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar System Orbital Model</title>
+    <style>
+        body { margin: 0; font-family: 'Inter', sans-serif; color: #e0e0e0; background-color: #00000a; display: flex; flex-direction: column; align-items: center; }
+        #container { width: 100vw; height: 100vh; position: relative; overflow: hidden; }
+        canvas { display: block; }
+        .panel { position: absolute; background: rgba(0, 0, 0, 0.75); border-radius: 12px; padding: 20px; border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: opacity 0.3s ease-in-out; z-index: 10; }
+        #info-panel { top: 20px; left: 20px; max-width: 350px; }
+        #info-panel h1 { margin-top: 0; font-size: 1.5rem; color: #ffffff; border-bottom: 1px solid #444; padding-bottom: 10px; }
+        #info-panel p { font-size: 0.9rem; line-height: 1.6; }
+        #legend-panel { bottom: 80px; left: 20px; }
+        #legend-panel h2 { margin-top: 0; font-size: 1.1rem; }
+        .legend-item { display: flex; align-items: center; margin-bottom: 8px; }
+        .legend-color { width: 20px; height: 4px; margin-right: 10px; border-radius: 2px; }
+        #controls { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; flex-wrap: wrap; gap: 10px; background: rgba(0, 0, 0, 0.7); padding: 10px 15px; border-radius: 12px; z-index: 20; justify-content: center; }
+        .button { padding: 10px 15px; border: none; border-radius: 8px; background-color: #334155; color: white; cursor: pointer; font-size: 0.9rem; transition: background-color 0.3s, transform 0.2s; border: 1px solid #4a5568; }
+        .button:hover { background-color: #475569; }
+        .button.active { background-color: #0ea5e9; font-weight: bold; transform: scale(1.05); box-shadow: 0 0 15px rgba(14, 165, 233, 0.5); }
+        .label { position: absolute; color: #fff; background: rgba(0, 0, 0, 0.6); padding: 2px 6px; border-radius: 4px; font-size: 12px; pointer-events: none; transform: translate(-50%, -150%); white-space: nowrap; text-shadow: 1px 1px 2px black; }
+        .dropdown { position: relative; display: inline-block; }
+        #planet-menu { display: none; position: absolute; bottom: 120%; left: 50%; transform: translateX(-50%); background-color: rgba(20, 20, 30, 0.9); min-width: 200px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); z-index: 1; border-radius: 8px; padding: 10px; border: 1px solid rgba(255, 255, 255, 0.2); }
+        #planet-menu label { color: white; padding: 8px 12px; text-decoration: none; display: block; cursor: pointer; border-radius: 4px; }
+        #planet-menu label:hover { background-color: #334155; }
+        #planet-menu input { margin-right: 10px; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="container">
+        <div id="info-panel" class="panel"><h1 id="model-title"></h1><p id="model-description"></p></div>
+        <div id="legend-panel" class="panel">
+            <h2>Path Legend</h2>
+            <div class="legend-item"><div class="legend-color" style="background: linear-gradient(90deg, #0077ff, #ff4500, #f0e68c);"></div><span>Planet Orbits</span></div>
+            <div class="legend-item"><div class="legend-color" style="background-color: #cccccc;"></div><span>Dwarf Planet Orbits</span></div>
+            <div class="legend-item tno-legend"><div class="legend-color" style="background-color: #555555;"></div><span>Original TNO Path</span></div>
+            <div class="legend-item tno-legend"><div class="legend-color" style="background-color: #ffffff;"></div><span>Aligned TNO Path</span></div>
+            <div class="legend-item tno-legend"><div class="legend-color" style="background-color: #ffd700;"></div><span>Gravitational Shift</span></div>
+        </div>
+        <div id="controls">
+            <button class="button active" id="btn-standard">Standard Model</button>
+            <button class="button" id="btn-p9">Planet Nine Hypothesis</button>
+            <button class="button" id="btn-prog">Progressive Mass</button>
+            <div class="dropdown">
+                <button class="button" id="btn-labels">Labels</button>
+                <div id="planet-menu"></div>
+            </div>
+            <button class="button" id="btn-ui">Toggle UI</button>
+        </div>
+    </div>
+    <script type="importmap">{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js","three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"}}</script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls;
+        const planets = [], dwarfPlanets = [], tnoSystems = [];
+        let planetNine;
+        let activeModel = 'standard', massModel = 'real', uiVisible = true;
+        let animationState = { animating: false, progress: 0, duration: 1500, startTime: 0, direction: 1 };
+        
+        const MERC_TO_EARTH = 1 / 18.1;
+        const ORBIT_POINTS = 256;
+
+        const realMasses = { Mercury: 1, Venus: 14.8, Earth: 18.1, Mars: 1.9, Ceres: 0.0015, Jupiter: 5752, Saturn: 1722, Uranus: 263, Neptune: 310, Pluto: 0.04 };
+        const progressiveMasses = { Jupiter: 2500, Saturn: 1920.25, Uranus: 1340.5, Neptune: 760.75, Pluto: 181 };
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x00000a);
+            const container = document.getElementById('container');
+            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 5000);
+            camera.position.set(0, 300, 500);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.maxDistance = 2500;
+            controls.minDistance = 30;
+            scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+            scene.add(new THREE.PointLight(0xffffff, 2.5, 3000));
+            createSun(); createPlanets(); createDwarfPlanets(); createTnoSystems(); createPlanetNine(); createPlanetToggleMenu();
+            updateVisuals();
+            setupEventListeners();
+        }
+        
+        function createSun() { scene.add(new THREE.Mesh(new THREE.SphereGeometry(7, 32, 32), new THREE.MeshBasicMaterial({ color: 0xffff00 }))); }
+
+        function createPlanets() { 
+            const planetData = [
+                ['Mercury', 0xaaaaaa, 1, 30, 0.24], ['Venus', 0xeda359, 1.8, 45, 0.61], ['Earth', 0x0077ff, 2, 60, 1],
+                ['Mars', 0xff4500, 1.5, 80, 1.88], ['Jupiter', 0xd2b48c, 7, 150, 11.86], ['Saturn', 0xf0e68c, 6, 220, 29.46],
+                ['Uranus', 0xadd8e6, 4, 300, 84.01], ['Neptune', 0x0000ff, 3.8, 380, 164.8]
+            ];
+            planetData.forEach(([name, color, radius, distance, speed]) => {
+                const planet = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 32), new THREE.MeshStandardMaterial({ color }));
+                planet.userData.baseRadius = radius;
+                const orbit = createOrbitPath({ distance, color: color, opacity: 0.5 });
+                const planetObj = { name, mesh: planet, orbit, distance, speed, angle: Math.random() * Math.PI * 2, params: { distance }, realMass: realMasses[name] };
+                planets.push(planetObj);
+                scene.add(planet, orbit);
+                createLabel(planetObj);
+                if (name === 'Saturn') {
+                    const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 1.5, radius * 2.5, 64), new THREE.MeshBasicMaterial({ color: 0xaaaaaa, side: THREE.DoubleSide, transparent: true, opacity: 0.6}));
+                    ring.rotation.x = Math.PI / 2.5;
+                    planet.add(ring);
+                    planet.userData.ring = ring;
+                }
+            });
+        }
+        
+        function createDwarfPlanets() { 
+            const dwarfPlanetData = [
+                ['Ceres', 0x39ff14, 0.8, 110, 4.6, { eccentricity: 0.08, inclination: 0.18, periapsisAngle: 1.2 }],
+                ['Pluto', 0xa0d2ff, 1, 450, 248, { eccentricity: 0.25, inclination: 0.3, periapsisAngle: 3.9 }]
+            ];
+             dwarfPlanetData.forEach(([name, color, radius, distance, speed, params]) => {
+                const dwarfPlanet = new THREE.Mesh( new THREE.SphereGeometry(radius, 32, 32), new THREE.MeshStandardMaterial({ color }));
+                dwarfPlanet.userData.baseRadius = radius;
+                params.distance = distance;
+                const orbit = createOrbitPath({ ...params, color: 0xcccccc, opacity: 0.7 });
+                const dwarfPlanetObj = { name, mesh: dwarfPlanet, orbit, speed, angle: Math.random() * Math.PI * 2, params, realMass: realMasses[name] };
+                dwarfPlanets.push(dwarfPlanetObj);
+                scene.add(dwarfPlanet, orbit);
+                createLabel(dwarfPlanetObj);
+            });
+        }
+        
+        function createLabel(celestialBody) { 
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'label';
+            document.getElementById('container').appendChild(labelDiv);
+            celestialBody.labelDiv = labelDiv;
+            celestialBody.labelVisible = true;
+        }
+
+        function createTnoSystems() { 
+            const clusterAngle = Math.PI * 1.5;
+            for (let i = 0; i < 8; i++) {
+                const standardParams = { distance: 500 + Math.random() * 150, eccentricity: 0.5 + Math.random() * 0.4, inclination: (Math.random() - 0.5) * 0.8, periapsisAngle: Math.random() * Math.PI * 2, speed: 600 + Math.random() * 200 };
+                const p9Params = { distance: 600 + Math.random() * 200, eccentricity: 0.7 + Math.random() * 0.2, inclination: 0.3 + (Math.random() - 0.5) * 0.2, periapsisAngle: clusterAngle + (Math.random() - 0.5) * 0.25, speed: 700 + Math.random() * 250 };
+                
+                const standardOrbitGeom = createOrbitPathGeom(standardParams);
+                const p9OrbitGeom = createOrbitPathGeom(p9Params);
+                const material = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true });
+
+                const visibleOrbit = new THREE.Line(standardOrbitGeom.clone(), material);
+                const divergenceLines = createDivergenceLines(standardOrbitGeom.attributes.position.array, p9OrbitGeom.attributes.position.array);
+                
+                const mesh = new THREE.Mesh( new THREE.SphereGeometry(1.2, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+                const tnoSystem = { mesh, standardParams, p9Params, angle: Math.random() * Math.PI * 2, visibleOrbit, standardOrbitGeom, p9OrbitGeom, divergenceLines };
+                tnoSystems.push(tnoSystem);
+                scene.add(mesh, visibleOrbit, divergenceLines);
+            }
+        }
+
+        function createPlanetNine() { 
+            const p9Params = { distance: 1000, eccentricity: 0.6, inclination: 0.4, periapsisAngle: Math.PI * 0.5, speed: 3000 };
+            planetNine = { mesh: new THREE.Mesh( new THREE.SphereGeometry(10, 32, 32), new THREE.MeshStandardMaterial({ color: 0x5a6a8a })), orbit: createOrbitPath({ ...p9Params, color: 0x5a6a8a, opacity: 1.0 }), params: p9Params, angle: 0 };
+            scene.add(planetNine.mesh, planetNine.orbit);
+        }
+
+        function createOrbitPathGeom({ distance, eccentricity = 0, inclination = 0, periapsisAngle = 0 }) {
+            const semiMajorAxis = distance, semiMinorAxis = semiMajorAxis * Math.sqrt(1 - eccentricity * eccentricity), centerOffsetX = -semiMajorAxis * eccentricity;
+            const curve = new THREE.EllipseCurve(centerOffsetX, 0, semiMajorAxis, semiMinorAxis, 0, 2 * Math.PI, false, 0);
+            const points = curve.getPoints(ORBIT_POINTS);
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const euler = new THREE.Euler(inclination, periapsisAngle, 0, 'YXZ');
+            geometry.rotateX(euler.x).rotateY(euler.y).rotateZ(euler.z);
+            return geometry;
+        }
+        function createOrbitPath(params) { return new THREE.Line(createOrbitPathGeom(params), new THREE.LineBasicMaterial({ color: params.color, transparent: true, opacity: params.opacity })); }
+
+        function createDivergenceLines(points1, points2) { 
+            const vertices = [];
+            for (let i = 0; i < points1.length; i += 3) { vertices.push(points1[i], points1[i+1], points1[i+2]); vertices.push(points2[i], points2[i+1], points2[i+2]); }
+            const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            const material = new THREE.LineDashedMaterial({ color: 0xffd700, linewidth: 1, scale: 1, dashSize: 3, gapSize: 3, transparent: true, opacity: 0 });
+            const lines = new THREE.LineSegments(geometry, material); lines.computeLineDistances(); return lines;
+        }
+
+        function createPlanetToggleMenu() { 
+            const menu = document.getElementById('planet-menu'); const allPlanets = [...planets, ...dwarfPlanets];
+            allPlanets.forEach(p => {
+                const label = document.createElement('label'); const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox'; checkbox.checked = true; checkbox.dataset.name = p.name;
+                checkbox.addEventListener('change', (event) => { allPlanets.find(pl => pl.name === event.target.dataset.name).labelVisible = event.target.checked; });
+                label.appendChild(checkbox); label.appendChild(document.createTextNode(p.name)); menu.appendChild(label);
+            });
+            menu.addEventListener('click', (event) => event.stopPropagation());
+        }
+        
+        function animate(time) { 
+            requestAnimationFrame(animate);
+            if (animationState.animating) {
+                const elapsed = time - animationState.startTime;
+                let progress = elapsed / animationState.duration;
+                if (progress > 1) {
+                    progress = 1;
+                    animationState.animating = false;
+                }
+                const t = animationState.direction === 1 ? progress : 1 - progress;
+                
+                tnoSystems.forEach(s => {
+                    const positions = s.visibleOrbit.geometry.attributes.position;
+                    const standardPos = s.standardOrbitGeom.attributes.position;
+                    const p9Pos = s.p9OrbitGeom.attributes.position;
+                    for (let i = 0; i < positions.count; i++) {
+                        const x = standardPos.getX(i) + (p9Pos.getX(i) - standardPos.getX(i)) * t;
+                        const y = standardPos.getY(i) + (p9Pos.getY(i) - standardPos.getY(i)) * t;
+                        const z = standardPos.getZ(i) + (p9Pos.getZ(i) - standardPos.getZ(i)) * t;
+                        positions.setXYZ(i, x, y, z);
+                    }
+                    positions.needsUpdate = true;
+                    s.divergenceLines.material.opacity = t * 0.6;
+                });
+            }
+
+            [...planets, ...dwarfPlanets].forEach(p => { p.angle += (1 / p.speed) * 0.05; p.mesh.position.copy(calculateEllipsePosition(p.angle, p.params)); });
+            const isP9Effect = activeModel === 'p9' || massModel === 'progressive';
+            tnoSystems.forEach(s => { const p = isP9Effect ? s.p9Params : s.standardParams; s.angle += (1 / p.speed) * 0.05; s.mesh.position.copy(calculateEllipsePosition(s.angle, p)); });
+            if (planetNine.mesh.visible) { planetNine.angle += (1 / planetNine.params.speed) * 0.05; planetNine.mesh.position.copy(calculateEllipsePosition(planetNine.angle, planetNine.params)); }
+            
+            updateLabels(isP9Effect); 
+            controls.update(); 
+            renderer.render(scene, camera);
+        }
+        
+        function updateLabels() { 
+            const allBodies = [...planets, ...dwarfPlanets];
+            allBodies.forEach(p => {
+                if (!p.labelVisible || !p.mesh.visible) { p.labelDiv.style.display = 'none'; return; }
+                
+                let currentMass = p.realMass;
+                if (massModel === 'progressive' && progressiveMasses[p.name]) {
+                    currentMass = progressiveMasses[p.name];
+                }
+                const massInEarths = currentMass * MERC_TO_EARTH;
+                p.labelDiv.textContent = `${p.name} (${massInEarths.toFixed(1)} M⊕)`;
+
+                const vec = new THREE.Vector3(); p.mesh.getWorldPosition(vec); vec.project(camera);
+                const x = (vec.x * 0.5 + 0.5) * renderer.domElement.clientWidth; const y = (-vec.y * 0.5 + 0.5) * renderer.domElement.clientHeight;
+                if (vec.z > 1) { p.labelDiv.style.display = 'none'; } else { p.labelDiv.style.display = 'block'; p.labelDiv.style.left = `${x}px`; p.labelDiv.style.top = `${y}px`; }
+            });
+        }
+
+        function calculateEllipsePosition(angle, { distance, eccentricity, inclination, periapsisAngle }) { 
+            const a = distance, e = eccentricity || 0, b = a * Math.sqrt(1 - e * e); const x = a * Math.cos(angle) - a * e; const z = b * Math.sin(angle);
+            const pos = new THREE.Vector3(x, 0, z); const euler = new THREE.Euler(inclination || 0, periapsisAngle || 0, 0, 'YXZ'); pos.applyEuler(euler); return pos;
+        }
+
+        function onWindowResize() { const container = document.getElementById('container'); camera.aspect = container.clientWidth / container.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(container.clientWidth, container.clientHeight); }
+        
+        function setupEventListeners() {
+            document.getElementById('btn-standard').addEventListener('click', () => setModels('standard', 'real'));
+            document.getElementById('btn-p9').addEventListener('click', () => setModels(activeModel === 'p9' ? 'standard' : 'p9', 'real'));
+            document.getElementById('btn-prog').addEventListener('click', () => setModels('standard', massModel === 'progressive' ? 'real' : 'progressive'));
+            document.getElementById('btn-ui').addEventListener('click', toggleUI);
+            document.getElementById('btn-labels').addEventListener('click', e => {
+                document.getElementById('planet-menu').style.display = document.getElementById('planet-menu').style.display === 'block' ? 'none' : 'block';
+                e.stopPropagation();
+            });
+            document.addEventListener('click', () => document.getElementById('planet-menu').style.display = 'none');
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function setModels(newActiveModel, newMassModel) {
+            const oldP9Effect = activeModel === 'p9' || massModel === 'progressive';
+            activeModel = newActiveModel;
+            massModel = newMassModel;
+            if (activeModel === 'standard' && massModel === 'real') activeModel = 'standard';
+
+            const newP9Effect = activeModel === 'p9' || massModel === 'progressive';
+            if (newP9Effect && !oldP9Effect) { // Animate TO P9
+                animationState = { animating: true, startTime: performance.now(), duration: 1500, direction: 1 };
+            } else if (!newP9Effect && oldP9Effect) { // Animate FROM P9
+                animationState = { animating: true, startTime: performance.now(), duration: 1500, direction: -1 };
+            }
+            updateVisuals();
+        }
+
+        function updateVisuals() {
+            const isP9Hypothesis = activeModel === 'p9';
+            const isProgressive = massModel === 'progressive';
+            const isP9Effect = isP9Hypothesis || isProgressive;
+            
+            [...planets, ...dwarfPlanets].forEach(p => {
+                let scale = 1.0;
+                let currentMass = p.realMass;
+                if (isProgressive && progressiveMasses[p.name]) {
+                    currentMass = progressiveMasses[p.name];
+                }
+                scale = Math.cbrt(currentMass * MERC_TO_EARTH) * 1.5; // Scaled relative to Earth
+                p.mesh.scale.set(scale, scale, scale);
+                if(p.mesh.userData.ring) p.mesh.userData.ring.scale.set(1/scale, 1/scale, 1/scale);
+            });
+
+            tnoSystems.forEach(s => { 
+                s.visibleOrbit.material.color.set(isP9Effect ? 0xffffff : 0x555555);
+                s.mesh.material.color.set(isP9Effect ? 0xffffff : 0x999999); 
+            });
+            planetNine.mesh.visible = isP9Hypothesis; planetNine.orbit.visible = isP9Hypothesis;
+            
+            document.querySelectorAll('.button').forEach(b => b.classList.remove('active'));
+            if (!isP9Hypothesis && !isProgressive) document.getElementById('btn-standard').classList.add('active');
+            if (isP9Hypothesis) document.getElementById('btn-p9').classList.add('active');
+            if (isProgressive) document.getElementById('btn-prog').classList.add('active');
+            
+            const title = document.getElementById('model-title');
+            const desc = document.getElementById('model-description');
+            document.querySelectorAll('.tno-legend').forEach(el => el.style.display = isP9Effect ? 'flex' : 'none');
+
+            let currentDesc;
+            if (isProgressive) {
+                title.textContent = "Progressive Mass Model";
+                currentDesc = "This model re-imagines the outer planets in a sequence of decreasing mass, starting with a <b>138 M⊕ Jupiter</b> and ending with a <b>10 M⊕ Pluto</b>. This massive Pluto provides a perfect explanation for the Planet Nine effect.";
+            } else if (isP9Hypothesis) {
+                title.textContent = "Planet Nine Hypothesis";
+                currentDesc = "A hypothetical 9th planet realigns TNOs from their original paths into <b>new, clustered orbits</b>. The simulation animates this gravitational shift.";
+            } else {
+                title.textContent = "Standard Model";
+                currentDesc = "Shows the known planets and TNOs in their current, <b>scattered orbits</b>. This is our solar system as we observe it today.";
+            }
+            desc.innerHTML = currentDesc;
+        }
+
+        function toggleUI() {
+            uiVisible = !uiVisible;
+            document.getElementById('info-panel').style.opacity = uiVisible ? '1' : '0';
+            document.getElementById('legend-panel').style.opacity = uiVisible ? '1' : '0';
+            document.getElementById('btn-ui').classList.toggle('active', uiVisible);
+        }
+
+        init();
+        animate(0);
+    </script>
+</body>
+</html>
+
