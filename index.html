@@ -4,52 +4,32 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Project Index</title>
-    <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Google Fonts for a polished look -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        /* Use the Inter font family */
+        /* A clean, modern, system-native font stack */
         body {
-            font-family: 'Inter', sans-serif;
-        }
-        /* Simple animation for list items appearing */
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .list-item {
-            animation: fadeIn 0.5s ease-out forwards;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-200 antialiased">
+<body class="bg-gray-50 text-gray-700">
 
-    <div class="container mx-auto max-w-3xl px-4 py-12 md:py-20">
+    <div class="max-w-2xl mx-auto py-16 px-4">
 
-        <header class="mb-10 text-center">
-            <h1 id="repo-title" class="text-4xl md:text-5xl font-bold text-white mb-2">Project Pages</h1>
-            <p id="repo-description" class="text-lg text-gray-400">An automatically generated index of all HTML pages in this repository.</p>
+        <header class="text-center mb-10">
+            <h1 id="repo-title" class="text-4xl font-bold tracking-tight text-gray-900">Project Pages</h1>
+            <p id="repo-description" class="mt-3 text-lg text-gray-600">An automatically generated index of all HTML pages in this repository.</p>
         </header>
 
         <main>
-            <div id="file-list-container" class="bg-gray-800/50 border border-gray-700 rounded-lg shadow-lg">
-                <!-- Links will be dynamically inserted here -->
-                <div id="loader" class="p-8 text-center text-gray-400">
-                    <svg class="animate-spin h-8 w-8 text-blue-400 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    <p>Fetching repository files...</p>
-                </div>
-            </div>
+            <ul id="file-list" class="bg-white border border-gray-200 rounded-lg shadow-sm divide-y divide-gray-200">
+                <li class="p-4 text-gray-500">Loading pages...</li>
+            </ul>
         </main>
 
-        <footer class="text-center mt-12 text-gray-500">
+        <footer class="text-center mt-10 text-sm text-gray-500">
             <p>This page is dynamically generated using the GitHub API.</p>
-            <a id="repo-link" href="#" class="text-blue-400 hover:underline">View Repository on GitHub</a>
+            <a id="repo-link" href="#" class="text-blue-600 hover:underline">View Repository on GitHub</a>
         </footer>
 
     </div>
@@ -58,89 +38,69 @@
         // --- CONFIGURATION ---
         // IMPORTANT: Replace these values with your GitHub username and repository name.
         const GITHUB_USERNAME = "andylehti"; // Replace with your GitHub username
-        const GITHUB_REPO = "js.physics"; // Replace with your repository name
+        const GITHUB_REPO = "js.physics";    // Replace with your repository name
         // ---------------------
 
         document.addEventListener('DOMContentLoaded', () => {
-            const fileListContainer = document.getElementById('file-list-container');
-            const loader = document.getElementById('loader');
+            const fileList = document.getElementById('file-list');
+            const repoTitle = document.getElementById('repo-title');
+            const repoDescription = document.getElementById('repo-description');
+            const repoLink = document.getElementById('repo-link');
 
             // Set repository-specific text on the page
-            document.getElementById('repo-title').textContent = `${GITHUB_REPO} Pages`;
-            document.getElementById('repo-description').innerHTML = `An index of HTML pages in the <strong>${GITHUB_USERNAME}/${GITHUB_REPO}</strong> repository.`;
-            const repoLink = document.getElementById('repo-link');
+            repoTitle.textContent = `${GITHUB_REPO} Pages`;
+            repoDescription.innerHTML = `An index of HTML pages in the <strong>${GITHUB_USERNAME}/${GITHUB_REPO}</strong> repository.`;
             repoLink.href = `https://github.com/${GITHUB_USERNAME}/${GITHUB_REPO}`;
             repoLink.textContent = `View ${GITHUB_REPO} on GitHub`;
 
-
-            // The URL for the GitHub API to get the contents of the root directory.
+            // The URL for the GitHub API to get the contents of the root directory
             const apiUrl = `https://api.github.com/repos/${GITHUB_USERNAME}/${GITHUB_REPO}/contents/`;
 
-            async function fetchFiles() {
+            async function fetchAndDisplayPages() {
                 try {
                     const response = await fetch(apiUrl);
                     if (!response.ok) {
-                        throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
+                        throw new Error(`GitHub API Error: ${response.status}`);
                     }
                     const files = await response.json();
 
-                    // Filter for HTML files, excluding this index.html file itself.
-                    const htmlFiles = files.filter(file =>
-                        file.type === 'file' &&
-                        file.name.endsWith('.html') &&
-                        file.name.toLowerCase() !== 'index.html'
-                    );
+                    // Filter for HTML files (excluding this index file) and sort them alphabetically
+                    const htmlFiles = files
+                        .filter(file => file.name.endsWith('.html') && file.name.toLowerCase() !== 'index.html')
+                        .sort((a, b) => a.name.localeCompare(b.name));
 
-                    // Clear the loader
-                    loader.remove();
+                    // Clear the "Loading..." message
+                    fileList.innerHTML = '';
 
                     if (htmlFiles.length === 0) {
-                        fileListContainer.innerHTML = '<div class="p-8 text-center text-gray-400">No other HTML pages found in this repository.</div>';
+                        fileList.innerHTML = `<li class="p-4 text-gray-500">No other HTML pages found.</li>`;
                         return;
                     }
 
-                    // Create and append links for each HTML file
-                    htmlFiles.forEach((file, index) => {
-                        // Create the list item element
-                        const listItem = document.createElement('a');
-                        listItem.href = file.name; // Link directly to the file
-                        listItem.className = 'list-item block p-4 sm:p-5 hover:bg-gray-700 transition-colors duration-200 ease-in-out';
-                        // Add a border between items, but not on the last one
-                        if (index < htmlFiles.length - 1) {
-                           listItem.classList.add('border-b', 'border-gray-700');
-                        }
+                    // Create and append a list item for each HTML file
+                    htmlFiles.forEach(file => {
+                        // Format the name for display (e.g., "my-cool-page.html" -> "My Cool Page")
+                        const displayName = file.name
+                            .slice(0, -5)
+                            .replace(/-/g, ' ')
+                            .replace(/\b\w/g, char => char.toUpperCase());
 
-                        // Get the filename without the .html extension
-                        const fileName = file.name.slice(0, -5);
-                        // Format the name for display (e.g., "my-cool-page" -> "My Cool Page")
-                        const displayName = fileName.replace(/-/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
-
-                        // Create the content for the list item
+                        const listItem = document.createElement('li');
                         listItem.innerHTML = `
-                            <div class="flex items-center justify-between">
-                                <span class="text-lg font-medium text-blue-300">${displayName}</span>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5 text-gray-500">
-                                    <polyline points="9 18 15 12 9 6"></polyline>
-                                </svg>
-                            </div>
+                            <a href="${file.name}" class="block p-4 transition-colors hover:bg-gray-100">
+                                <span class="font-medium text-blue-700">${displayName}</span>
+                            </a>
                         `;
-                        
-                        fileListContainer.appendChild(listItem);
+                        fileList.appendChild(listItem);
                     });
 
                 } catch (error) {
                     console.error("Failed to fetch repository files:", error);
-                    loader.remove();
-                    fileListContainer.innerHTML = `
-                        <div class="p-8 text-center text-red-400">
-                            <h3 class="font-bold text-lg mb-2">Error loading files</h3>
-                            <p class="text-sm">Could not fetch the file list from GitHub.</p>
-                            <p class="text-xs mt-2 text-gray-500">Please check the console for details and ensure the GITHUB_USERNAME and GITHUB_REPO variables are correct.</p>
-                        </div>`;
+                    fileList.innerHTML = `<li class="p-4 text-red-600 font-medium">Error: Could not load files from the repository.</li>`;
                 }
             }
 
-            fetchFiles();
+            fetchAndDisplayPages();
         });
     </script>
 
