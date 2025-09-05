@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Site Index</title>
+<meta name="color-scheme" content="light dark" />
+<style>
+  :root {
+    --bg: #fff;
+    --fg: #0b1020;
+    --muted: #61708a;
+    --card: #f6f8fb;
+    --border: #e5e9f2;
+    --link: #0d63ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0b0f17; --fg:#e7edf7; --muted:#a6b3c7; --card:#131a24; --border:#1e2633; --link:#7aa2ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+  }
+  .wrap { max-width: 900px; margin: 56px auto; padding: 0 20px 48px; }
+  header { display:flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+  h1 { font-size: 28px; margin: 0; letter-spacing: 0.2px; }
+  .sub { color: var(--muted); font-size: 14px; }
+  .controls { display:flex; gap:8px; flex-wrap: wrap; }
+  input[type="search"] {
+    width: min(420px, 100%); padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--fg);
+    outline: none;
+  }
+  select, button {
+    padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--fg); cursor: pointer;
+  }
+  button:hover, select:hover, input[type="search"]:focus { border-color: var(--muted); }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-top: 12px;
+  }
+  ul#list { list-style: none; padding: 0; margin: 0; }
+  li.item { padding: 12px; border-radius: 10px; display:grid; gap: 3px; }
+  li.item:hover { background: color-mix(in srgb, var(--card) 70%, var(--border)); }
+  a.page {
+    text-decoration: none; color: var(--link); font-weight: 600; word-break: break-word;
+  }
+  .meta { color: var(--muted); font-size: 13px; }
+  .empty { padding: 16px; color: var(--muted); }
+  footer { margin-top: 28px; color: var(--muted); font-size: 13px; }
+  code { background: color-mix(in srgb, var(--card) 80%, var(--border)); padding: 1px 6px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Index</h1>
+      <div class="sub" id="subtitle">Auto-built from repository HTML files</div>
+    </div>
+    <div class="controls">
+      <input id="search" type="search" placeholder="Filter pages (type to search)…" />
+      <select id="sort">
+        <option value="name-asc">Name (A→Z)</option>
+        <option value="name-desc">Name (Z→A)</option>
+        <option value="path-asc">Path (A→Z)</option>
+        <option value="path-desc">Path (Z→A)</option>
+      </select>
+      <button id="refresh" title="Re-fetch from GitHub API">Refresh</button>
+    </div>
+  </header>
+
+  <div class="card">
+    <ul id="list" aria-live="polite"></ul>
+    <div class="empty" id="empty" hidden>No pages found.</div>
+  </div>
+
+  <footer id="footnote">
+    Powered by the GitHub REST API. Public repos do not require a token. Private repos require adding a fine-scoped token (see <code>GITHUB_TOKEN</code> hint in source).
+  </footer>
+</div>
+
+<script>
+/**
+ * --- CONFIGURE THESE THREE VALUES ---
+ * If you host this on GitHub Pages, this script will detect the correct base URL automatically.
+ * But we still need OWNER, REPO, and the branch ref used for Pages or your default branch.
+ */
+const OWNER  = "your-username-or-org";
+const REPO   = "your-repo";
+const BRANCH = "gh-pages"; // or "main"
+
+/**
+ * Optional: If you need to query within a subfolder (e.g., "docs"), set ROOT_PATH ('' for repo root)
+ */
+const ROOT_PATH = ""; // e.g., "docs"
+
+/**
+ * Optional: GitHub token (read-only, public_repo scope). Leave empty for public repos.
+ * You can also set it via ?token=... in the URL for one-off use.
+ */
+const URL_TOKEN = new URL(location.href).searchParams.get("token") || "";
+const GITHUB_TOKEN = URL_TOKEN || ""; // or paste a token string here for private repos
+
+/**
+ * Build the base URL for linking. If on GitHub Pages, use that; otherwise, fallback to raw GitHub Pages pattern.
+ * Project Pages: https://{user}.github.io/{repo}/
+ * User/Org Pages: https://{user}.github.io/
+ */
+function computePagesBase() {
+  const isPages = /github\.io$/i.test(location.hostname);
+  if (isPages) {
+    // If path starts with /{repo}/ we're on a Project Page; otherwise User/Org Page.
+    const segs = location.pathname.split("/").filter(Boolean);
+    if (segs.length > 0 && segs[0].toLowerCase() === REPO.toLowerCase()) {
+      return `${location.origin}/${segs[0]}/`; // project page base
+    }
+    return `${location.origin}/`; // user/org page base
+  }
+  // Fallback to canonical project pages URL
+  return `https://${OWNER}.github.io/${REPO}/`;
+}
+const PAGES_BASE = computePagesBase();
+
+/**
+ * Fetch the full repo tree recursively, filter for .html files, and render.
+ * Uses: GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1
+ * Docs: https://docs.github.com/en/rest/git/trees#get-a-tree
+ */
+async function fetchHtmlList() {
+  const api = `https://api.github.com/repos/${OWNER}/${REPO}/git/trees/${encodeURIComponent(BRANCH)}?recursive=1`;
+  const headers = new Headers({ "Accept": "application/vnd.github+json" });
+  if (GITHUB_TOKEN) headers.set("Authorization", `Bearer ${GITHUB_TOKEN}`);
+
+  const res = await fetch(api, { headers });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`GitHub API error ${res.status}: ${text || res.statusText}`);
+  }
+  const data = await res.json();
+
+  if (!data.tree || !Array.isArray(data.tree)) {
+    throw new Error("Unexpected GitHub API response (no tree).");
+  }
+
+  // Filter paths within ROOT_PATH (if provided)
+  const inRoot = (p) => {
+    if (!ROOT_PATH) return true;
+    return p === ROOT_PATH || p.startsWith(ROOT_PATH + "/");
+  };
+
+  // Collect .html files (exclude directories and common non-page files)
+  const htmlFiles = data.tree
+    .filter(node => node.type === "blob" && /\.html$/i.test(node.path) && inRoot(node.path))
+    .filter(node => !/^(?:index|404|README)\.html$/i.test(node.path.split("/").pop()));
+
+  return htmlFiles.map(node => {
+    const path = node.path;
+    const file = path.split("/").pop();
+    const nameNoExt = file.replace(/\.html$/i, "");
+    return { path, file, nameNoExt };
+  });
+}
+
+/** Render list with search/sort */
+function render(items) {
+  const list = document.getElementById("list");
+  const empty = document.getElementById("empty");
+  list.innerHTML = "";
+
+  if (items.length === 0) {
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+
+  const frag = document.createDocumentFragment();
+  for (const it of items) {
+    const li = document.createElement("li");
+    li.className = "item";
+
+    // Build an href that works on GitHub Pages for nested paths
+    const href = new URL(it.path, PAGES_BASE).toString();
+
+    const a = document.createElement("a");
+    a.className = "page";
+    a.href = href;
+    a.textContent = it.nameNoExt;
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = it.path;
+
+    li.appendChild(a);
+    li.appendChild(meta);
+    frag.appendChild(li);
+  }
+  list.appendChild(frag);
+}
+
+/** Sorting helpers */
+function sortItems(items, mode) {
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+  const byName = (a, b) => collator.compare(a.nameNoExt, b.nameNoExt);
+  const byPath = (a, b) => collator.compare(a.path, b.path);
+  switch (mode) {
+    case "name-desc": return items.sort((a, b) => -byName(a, b));
+    case "path-asc":  return items.sort(byPath);
+    case "path-desc": return items.sort((a, b) => -byPath(a, b));
+    case "name-asc":
+    default:          return items.sort(byName);
+  }
+}
+
+/** Simple search filter across name and path */
+function filterItems(items, q) {
+  if (!q) return items;
+  const needle = q.trim().toLowerCase();
+  if (!needle) return items;
+  return items.filter(it =>
+    it.nameNoExt.toLowerCase().includes(needle) ||
+    it.path.toLowerCase().includes(needle)
+  );
+}
+
+/** Main bootstrap */
+let ALL_ITEMS = [];
+async function bootstrap({ silent = false } = {}) {
+  const subtitle = document.getElementById("subtitle");
+  try {
+    if (!silent) subtitle.textContent = "Fetching pages from GitHub…";
+    const items = await fetchHtmlList();
+    ALL_ITEMS = items;
+    applyUI();
+    subtitle.textContent = `${items.length} page${items.length === 1 ? "" : "s"} found`;
+  } catch (err) {
+    console.error(err);
+    subtitle.textContent = "Failed to fetch from GitHub API";
+    document.getElementById("list").innerHTML = "";
+    const empty = document.getElementById("empty");
+    empty.hidden = false;
+    empty.textContent = "Error: " + (err?.message || err);
+  }
+}
+
+/** Wire up UI and render with current controls */
+function applyUI() {
+  const q = document.getElementById("search").value;
+  const sort = document.getElementById("sort").value;
+  const filtered = filterItems(ALL_ITEMS.slice(), q);
+  const sorted = sortItems(filtered, sort);
+  render(sorted);
+}
+
+/** Event listeners */
+document.getElementById("search").addEventListener("input", applyUI);
+document.getElementById("sort").addEventListener("change", applyUI);
+document.getElementById("refresh").addEventListener("click", () => bootstrap({ silent: false }));
+
+// Kick off
+bootstrap({ silent: false });
+</script>
+</body>
+</html>
